@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+
+<package>
+<job id="Portable-MSYS2">
+<?job error="True" debug="False"?>
+
+<resource id="UNAME">"admin"</resource>
+<resource id="SYS">$("SYS64").MSYS</resource>
+
+<resource id="SYS64">
+{MSYS: "MSYS", MIMGW: "MINGW64", CLANG: "CLANG64", UCRT: "UCRT64", CLANGARM: "CLANGARM64"}
+</resource>
+<resource id="SYS32">{MIMGW: "MINGW32", CLANG: "CLANG32"}</resource>
+
+<object id="CMD" progid="WScript.Shell" />
+<object id="FILER" progid="Scripting.FileSystemObject" />
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1, MINIMUM: 2, MAXIMUM: 3}</resource>
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+<resource id="F_MODE">
+{READING: 1, WRITING: 2, APPENDING: 8, ALLOW_CREATE: true, REUSE_ONLY: false, EXIST_OK: true, EXIST_NG: false}
+</resource>
+
+<resource id="ENVIRON">" MSYSTEM=${SYS} HOME=${HOME}"</resource>
+
+<script language="JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var $$ = function(id, parts){
+    var assign = function(match, p1, p2, p3, offset, string){ return parts[p2] };
+    return $(id).replace(/(\${)(.+?)(})/mg, assign) };
+
+  var _ = function(val){
+    if( !/^".*"$/g.test(val) && /\s/g.test(val) ){ return '"' + val + '"' }else{ return val } };
+
+  var NormPath = function(path){return FILER.GetAbsolutePathName(path)};
+
+  var JoinPath = function(){
+    if(arguments.length < 2 ){ FILER.BuildPath() }
+    var fullPath = arguments[0];
+    for(var seq=1; seq < arguments.length; seq++){
+      fullPath = FILER.BuildPath(fullPath, arguments[seq]); }
+    return fullPath;
+  };
+
+  var MakeDirs = function(dirs, mode){
+    var fullPath = FILER.GetAbsolutePathName(dirs);
+    if(FILER.FolderExists(fullPath)){ if(mode){return fullPath}else{FILER.CreateFolder(fullPath) } }
+    var dirQueue = [];
+    while(!FILER.FolderExists(fullPath)){
+      dirQueue.push(fullPath);
+      fullPath = FILER.GetParentFolderName(fullPath) }
+    while(0 < dirQueue.length){ FILER.CreateFolder(dirQueue.pop()) }
+  };
+
+  var AppDir = FILER.GetParentFolderName(WSH.ScriptFullName), HomeDir="/home/" + $("UNAME");
+  var BinDir = JoinPath(AppDir, "usr", "bin"), BinSpec = JoinPath(BinDir, "mkpasswd");
+  var Accounts = JoinPath(AppDir, "etc", "passwd");
+
+  CMD.Run("cmd /c " + _(BinSpec) + " -c > " + _(Accounts), $("FIG").HEADLESS, $("SYNC").AWAIT);
+  var Passwd = FILER.OpenTextFile(Accounts, $("F_MODE").READING, $("F_MODE").REUSE_ONLY);
+
+  var Profile = Passwd.ReadLine().split(":"); Passwd.Close();
+  Profile[5] = HomeDir; Profile[6]="/bin/bash";
+
+  Passwd = FILER.OpenTextFile(Accounts, $("F_MODE").WRITING, $("F_MODE").REUSE_ONLY);
+  Passwd.WriteLine(Profile.join(":")); Passwd.Close();
+
+/* preset themes: dracula, flat-ui, html, mintty, nord, rosipov, vga, xterm */
+  var BinSpec = _(JoinPath(BinDir, "env")) + " PATH=" + _(BinDir) + $$("ENVIRON", {SYS: $("SYS"), HOME: _(HomeDir)});
+
+  var ArgList = [];
+  for(var seq=0; seq < WSH.Arguments.Count(); seq++){ArgList.push((_(WSH.Arguments(seq)) ) ) }
+
+  var BinOpt=" /bin/mintty -C /usr/share/mintty/themes/xterm -h start -w normal -p bottom -D -e /bin/bash -l -i " + ArgList.join(" ");
+
+  var StdOut = JoinPath(AppDir, "output.log");
+  
+  Status = !CMD.Run("cmd /c (echo [Mintty start]&&" + BinSpec + BinOpt + ") > " + StdOut + " 2>&1", $("FIG").HEADLESS, $("SYNC").AWAIT);
+
+  if(Status){WSH.Quit(true)}else{CMD.Run("notepad.exe " + StdOut, $("FIG").DEFAULT, $("SYNC").ASYNC); WSH.Quit(false)}
+
+  WSH.Quit(true);
+
+]]>
+</script>
+
+</job>
+</package>

@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+
+<package>
+<job id="Win-JupyterX">
+<?job error="True" debug="False"?>
+
+<object id="CMD" progid="WScript.Shell" />
+<object id="FILER" progid="Scripting.FileSystemObject" />
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1, MINIMUM: 2, MAXIMUM: 3}</resource>
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+
+<resource id="BUTTON">{OK: 0, OK_CANCEL: 1, YES_NO_CANCEL: 3, YES_NO: 4}</resource>
+<resource id="ICON">{STOP: 16, QUESTION: 32, WARNING: 48, INFO: 64}</resource>
+<resource id="ANSWER">{OK: 1, CANCEL: 2, YES: 6, NO: 7}</resource>
+<resource id="REPORT">{POPUP: true, SILENT: false}</resource>
+
+<resource id="F_MODE">
+{READING: 1, WRITING: 2, APPENDING: 8, ALLOW_CREATE: true, REUSE_ONLY: false, EXIST_OK: true, EXIST_NG: false}
+</resource>
+<resource id="F_TYPE">
+{JUNCTION: 1040, SYM_DIR: 1040, SYM_FILE: 1056, HARDLINK: 32, REAL_FILE: 32, REAL_DIR: 16}
+</resource>
+<resource id="FS_ERR">
+{FILE_NOT_EXISTS: -2146828235, DIR_NOT_EXISTS: -2146828212, INVALID_FILE_SPEC: -2146828236,
+ FD_ACCESS_DENIED: -2146828218, DIR_ALREADY_EXISTS: -2146828230}
+</resource>
+
+<resource id="REG_ERR">
+{KEY_ENTRY_NOT_EXISTS: -2147024894, INVALID_ROOT_KEY: -2147024893, KEY_ACCESS_DENIED: -2147024891}
+</resource>
+
+<resource id="DIALOG">"
+《エラーに対する応答要求》\n
+\n
+${DMAIN}：${LOCATION}\n
+${MEMBER}：${RESOURCE}\n
+\n
+エラーメッセージ：${MESSAGE}\n
+コード：${ERR_CODE} / タイプ：${ERR_TYPE}\n
+\n
+${OFFER}\n
+\n
+※エラーログ${STATUS}"
+</resource>
+
+<resource id="TERMINATE">"
+このエラーに対する選択肢はありません。\n
+処理を中断してプログラムを終了します"
+</resource>
+
+<resource id="CONFIRM">"
+エラーを無視して続行しますか？\n
+[はい]続行 ／ [いいえ]中断"
+</resource>
+
+<resource id="REDUNDANCY">
+"Jupyterはすでに起動中です。"
+</resource>
+
+<resource id="RETRY">
+"Jupyter起動失敗。再試行しますか？"
+</resource>
+
+<resource id="DEBUG">"[${DATETIME}] ${ERR_TYPE}:${ERR_CODE} ${RESOURCE} ${MESSAGE}"</resource>
+
+<resource id="CAPTION">"【終了ステータス】　Jupyter@${DATETIME}"</resource>
+
+<resource id="LOG_TMPL">
+/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}\.log$/g
+</resource>
+
+<script language="JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var $$ = function(id, parts){
+    var assign = function(match, p1, p2, p3, offset, string){ return parts[p2] };
+    return $(id).replace(/(\${)(.+?)(})/mg, assign) };
+
+  var _ = function(val){
+    if(!RegExp('^".*"$', 'g').test(val) && RegExp('\\s', 'g').test(val)){return '"' + val + '"'}else{return val} };
+
+  var GetEnv = function(envVar){ return CMD.ExpandEnvironmentStrings(envVar) };
+
+  var SetEnv = function(envVar, val){return CMD.Environment("Process").Item(envVar) = val};
+
+  var NormPath = function(path){return FILER.GetAbsolutePathName(path)};
+
+  var JoinPath = function(){
+    if(arguments.length < 2 ){ FILER.BuildPath() }
+    var fullPath = arguments[0];
+    for(var seq=1; seq < arguments.length; seq++){
+      fullPath = FILER.BuildPath(fullPath, arguments[seq]); }
+    return fullPath;
+  };
+
+  var MakeDirs = function(dirs, mode){
+    var fullPath = FILER.GetAbsolutePathName(dirs);
+    if(FILER.FolderExists(fullPath)){ if(mode){return fullPath}else{FILER.CreateFolder(fullPath) } }
+    var dirQueue = [];
+    while(!FILER.FolderExists(fullPath)){
+      dirQueue.push(fullPath);
+      fullPath = FILER.GetParentFolderName(fullPath) }
+    while(0 < dirQueue.length){ FILER.CreateFolder(dirQueue.pop()) }
+  };
+
+  var Trap = function(resource, err, popup, offer, parts){
+    var errLog = FILER.BuildPath(FILER.GetParentFolderName(WSH.ScriptFullName), "error.log");
+    if(err.number >= -2146829999 && err.number <= -2146820000){
+      var template = {DMAIN: "パス", LOCATION: NormPath(FILER.GetParentFolderName(resource)),
+                      MEMBER: "ファイル/フォルダ", RESOURCE: FILER.GetFileName(resource),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var type in $("FS_ERR")){
+        if($("FS_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else if(err.number >= -2147029999 && err.number <= -2147020000){
+      var template = {DMAIN: "ルート", LOCATION: resource.slice(0, resource.indexOf("\\")),
+                      MEMBER: "キー", RESOURCE: resource.slice(resource.indexOf("\\")),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var root in $("REG_ROOT")){
+        if(root == template.LOCATION){template.LOCATION = $("REG_ROOT")[root]; break} }
+      for(var type in $("REG_ERR")){
+        if($("REG_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else{WSH.Echo(err.messge); return}
+    try{var stream = FILER.OpenTextFile(errLog, $("F_MODE").APPENDING, $("F_MODE").ALLOW_CREATE);
+      stream.WriteLine($$("DEBUG", {
+        DATETIME: new Date().toLocaleString(), ERR_TYPE: template.ERR_TYPE,
+        ERR_CODE: err.number, RESOURCE: resource, MESSAGE: err.message}))
+      stream.Close(); template.STATUS = "参照可";
+    }catch(exc){ template["STATUS"] = "出力不可" }
+    if(popup){ return CMD.Popup($$("DIALOG", template), 0, "一時停止", parts) }
+    else{ return } };
+
+  var Khronos = function(bundle){
+    var overlay = function(word, mask){return (mask.slice(0, String(word).length * -1) + word)};
+    var timeStamp =
+      [[bundle.getFullYear(), overlay(bundle.getMonth() + 1, "00"), overlay(bundle.getDate(), "00")].join("-"),
+       [overlay(bundle.getHours(), "00"), overlay(bundle.getMinutes(), "00"),
+        overlay(bundle.getSeconds(), "00"), overlay(bundle.getMilliseconds(), "000")]. join("-")]. join("_");
+    return timeStamp;
+  }
+
+  var AppDir = FILER.GetParentFolderName(WSH.ScriptFullName), BinDir = JoinPath(AppDir, "scripts");
+  var VarDir = JoinPath(AppDir, "Var"), LogDir = JoinPath(VarDir, "Log"), ProcDir = JoinPath(VarDir, "Run");
+  var BinSpec = JoinPath(BinDir, "winjupyter_lab.bat"), WinDir = NormPath(GetEnv("%WINDIR%"));
+  var Moment = Khronos(new Date());
+  var LogSpec = JoinPath(LogDir, Moment + ".log"), ArgsSpec = JoinPath(ProcDir, Moment + ".args");
+
+  SetEnv("PROMPT", "$P$_$G"); SetEnv("PYTHONIOENCODING", "utf-8:utf-8");
+
+  var UserHome = GetEnv("%USERPROFILE%"), UserProf = GetEnv("%APPDATA%"), LocalProf = GetEnv("%LOCALAPPDATA%");
+
+  var Barrier = function(){
+    if(FILER.FolderExists(ProcDir)){
+      try{FILER.DeleteFolder(ProcDir)}
+      catch(exc){
+        if(exc.number == $("FS_ERR").FD_ACCESS_DENIED){ return false }
+        else{Trap(ProcDir, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK + $("ICON").STOP); WSH.Quit(false) } } }
+    return true
+  };
+
+  var ArgList = ["--port-retries=0"], Origin;
+  for(var seq=0; seq < WSH.Arguments.Count(); seq++){ArgList.push((_(WSH.Arguments(seq)) ) ) }
+  try{Origin = ProcDir; MakeDirs(ProcDir, $("F_MODE").EXIST_OK); Origin = LogDir; MakeDirs(LogDir, $("F_MODE").EXIST_OK)}
+  catch(exc){Trap(Origin, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK + $("ICON").STOP); WSH.Quit(false) }
+  var Semaphore = FILER.OpenTextFile(ArgsSpec, $("F_MODE").WRITING, $("F_MODE").ALLOW_CREATE);
+  var Args = ArgList.join(" "); Semaphore.WriteLine(Args);
+
+  var Status = !CMD.Run(_(BinSpec) +  " " + Args + " >> " + _(LogSpec) + " 2>&1", $("FIG").HEADLESS, $("SYNC").AWAIT);
+
+  if(!Status){
+    while(FILER.FileExists(ArgsSpec)){
+    try{
+      var LogIO = FILER.OpenTextFile(LogSpec, $("F_MODE").READING); break }
+    catch(exc){
+      if(exc.number == $("FS_ERR").FD_ACCESS_DENIED){WSH.Sleep(500) }
+      else{Trap(LogSpec, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK + $("ICON").STOP); WSH.Quit(false) } }
+    }
+    for(var line, answer, queue=[] ; answer != $("ANSWER").OK; queue.push(line)){
+      if(LogIO.AtEndOfStream){
+        LogIO.Close();
+        answer = CMD.Popup(queue.join("\n"), 0, $$("CAPTION", {DATETIME: Moment}), $("BUTTON").OK + $("ICON").WARNING) }
+      else{
+        line = LogIO.ReadLine(); if(LogIO.Line > 10){queue.shift()}
+      }
+    }
+  }
+
+  Semaphore.Close(); FILER.DeleteFile(ArgsSpec);
+
+  if(Barrier()){  
+    var Queue = []; var History = new Enumerator(FILER.GetFolder(LogDir).Files);
+    for(var item; !History.atEnd(); History.moveNext()){
+      item = History.item().Name;
+      if($("LOG_TMPL").test(item)){Queue.push(FILER.BuildPath(LogDir, item))}
+    }
+    Queue.sort(function(a, b){return (Date.parse(FILER.GetFile(a).DateLastModified) - Date.parse(FILER.GetFile(b).DateLastModified) ) } );
+    for(var item in Queue.slice(0, -10)){try{FILER.DeleteFile(Queue[item])}catch(exc){Trap(FIFO[log], exc, $("REPORT").SILENT)} }
+  }
+
+  WSH.Quit(Status);
+
+]]>
+</script>
+
+</job>
+</package>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+
+<package>
+<job id="Incognito">
+<?job error="True" debug="False" ?>
+
+<object id="CMD" progid="WScript.Shell" />
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1, MINIMUM: 2, MAXIMUM: 3}</resource>
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+
+<resource id="REG_PATH">HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\TrayNotify\</resource>
+
+<resource id="REG_KEYS">
+["IconStreams", "PastIconsStream", "PromotedIconCache"]
+</resource>
+
+<script language="JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var Root = getResource("REG_PATH"), Stub = $("REG_KEYS");
+  for(var seq in Stub){ CMD.RegDelete(Root + Stub[seq]) }
+
+  CMD.Run("taskkill /f /im explorer.exe", $("FIG").HEADLESS, $("SYNC").AWAIT);
+  CMD.Run('cmd /c start "Explorer" /b explorer.exe', $("FIG").HEADLESS, $("SYNC").ASYNC);
+
+  WSH.Quit(true);
+
+]]>
+</script>
+
+</job>
+</package>

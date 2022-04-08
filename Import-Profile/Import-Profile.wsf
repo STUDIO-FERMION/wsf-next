@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+
+<package>
+<job id="Import-Profile">
+<?job error="True" debug="True" ?>
+
+<object id="CMD" progid="WScript.Shell" />
+<object id="FILER" progid="Scripting.FileSystemObject" />
+<object id="GUI" progid="Shell.Application" />
+
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1}</resource>
+
+<resource id="F_OPT">{READING: 1, WRITING: 2, APPENDING: 8, ALLOW_CREATE: true, REUSE_ONLY: false}</resource>
+
+<resource id="BUTTON">{OK: 0, OK_CANCEL: 1, YES_NO_CANCEL: 3, YES_NO: 4}</resource>
+
+<resource id="ICON">{STOP: 16, QUESTION: 32, WARNING: 48, INFO: 64}</resource>
+
+<resource id="ANSWER">{OK: 1, CANCEL: 2, YES: 6, NO: 7}</resource>
+
+<resource id="BIF">
+{ONLY_FS: 0x0001, NO_DOMAIN: 0x0004, NO_ROOT: 0x0008, EDIT: 0x0010, NO_NEW_FOLDER : 0x0200, FILES: 0x4000}
+</resource>
+
+<resource id="RE">
+{DIRECTIVE: /^\[.+\]$/, INSTALL: /^\[Install[A-Z0-9]{16}\]$/, DEFAULT: /^Default=(.+)$/, PROFILE: /^\[Profile\S\]$/, 
+ PROPERTY: /^(\S+)=(.+)$/, HISTORY: /^Prof\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}$/g }
+</resource>
+
+<resource id="CONFIRM1">"
+Firefoxが起動中です。\n
+強制終了してもよろしいですか？"
+</resource>
+
+<resource id="NOTICE1">"
+インポートツールを終了します。\n
+Firefoxを終了してからやり直して下さい。"
+</resource>
+
+<resource id="DIALOG">"
+インポートするプロファイルデータのフォルダを選択して下さい。"
+</resource>
+
+<resource id="CONFIRM2">"
+[インポート元フォルダ: ${RESOURCE}]\n
+ から既定のプロファイル\n
+[プロファイル名  : ${NAME}]\n
+[データフォルダ名: ${FOLDER}]\n
+ に上書きでインポートします。よろしいですか？"
+</resource>
+
+<resource id="NOTICE3">"
+${REASON}インポートを中止しました。\n
+ツールを終了します。"
+</resource>
+
+<resource id="COMPLETE">"
+インポートを完了しました。\n
+ＯＫボタンをクリックして終了して下さい。"
+</resource>
+
+<resource id="ALERT1">"
+デフォルトのプロファイルが見つかりません。\n
+Firefoxを再起動し、プロファイルを再構成して下さい。\n
+改善しない場合はFirefoxを再インストールしてやり直して下さい。"
+</resource>
+
+<resource id="ALERT2">"
+プロファイルデータを書き込みできません。\n
+すべてのプログラムを終了した上で、再度実行して下さい。\n
+改善しない場合はPCを再起動してからやり直して下さい。"
+</resource>
+
+<resource id="CMDLINE">
+'cmd /c tasklist -nh -fi "username eq %username%" -fi "imagename eq firefox.exe" | findstr -r ^firefox.exe'
+</resource>
+
+<script language="JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var $$ = function(id, parts){
+    var assign = function(match, p1, p2, p3, offset, string){ return parts[p2] };
+    return $(id).replace(/(\${)(.+?)(})/mg, assign) };
+
+  var AppDir = FILER.GetParentFolderName(WSH.ScriptFullName);
+  var DataDir = FILER.BuildPath(CMD.ExpandEnvironmentStrings("%APPDATA%"), "Mozilla\\Firefox");
+  var ConfFile = FILER.BuildPath(DataDir, "profiles.ini");
+  var ProfDir = FILER.BuildPath(DataDir, "Profiles");
+  var Title= "インポートツール", Choice;
+
+  GUI.MinimizeAll();
+
+  var Status = !CMD.Run($("CMDLINE"), $("FIG").HEADLESS, $("SYNC").AWAIT)
+  if(Status){
+    Choice = CMD.Popup($("CONFIRM1"), 0, Title, $("BUTTON").YES_NO+$("ICON").WARNING);
+    if(Choice == $("ANSWER").YES){
+    CMD.Run('taskkill -f -fi "imagename eq firefox.exe"', $("FIG").HEADLESS, $("SYNC").ASYNC)} }
+
+    var BIF_MODE = $("BIF").ONLY_FS + $("BIF").NO_ROOT + $("BIF").NO_NEW_FOLDER;
+
+    var Resource = GUI.BrowseForFolder(0, $("DIALOG"), BIF_MODE, AppDir);
+
+    if(Boolean(Resource) == false){
+      CMD.Popup($$("NOTICE3", {REASON: "フォルダが選択されていないため、"}),
+       0, Title, $("BUTTON").OK+$("ICON").INFO); GUI.UndoMinimizeAll(); WSH.Quit(false)}
+
+  try{
+    var Stream = FILER.OpenTextFile(ConfFile, $("F_OPT").READING);
+    var Conf;
+    while(typeof DefProf != "string"){
+      if(Stream.AtEndOfStream){throw new Error("VALIDATION ERROR")}
+      if($("RE").INSTALL.test(Conf)){
+        while(!Stream.AtEndOfStream){
+          Conf = Stream.ReadLine();
+          if($("RE").DIRECTIVE.test(Conf)){break}
+          if($("RE").DEFAULT.test(Conf)){var DefProf = RegExp.$1;}
+        }
+      }else{Conf = Stream.ReadLine();}
+    }
+
+    Stream = FILER.OpenTextFile(ConfFile, $("F_OPT").READING);
+    var Target = {}; 
+
+    Conf = Stream.ReadLine();
+    while(Target.Path != DefProf){
+      if(Stream.AtEndOfStream){throw new Error("VALIDATION ERROR")}
+      if($("RE").PROFILE.test(Conf)){
+        while(!Stream.AtEndOfStream){
+          Conf = Stream.ReadLine();
+          if($("RE").DIRECTIVE.test(Conf)){break}
+          if($("RE").PROPERTY.test(Conf)){Target[RegExp.$1] = RegExp.$2;}
+        }
+      }
+      else{ Conf = Stream.ReadLine() }
+    }
+  }catch(exc){
+    CMD.Popup($("ALERT1"), 0, Title, $("BUTTON").OK+$("ICON").STOP); GUI.UndoMinimizeAll(); 
+    WSH.Quit(false) }
+
+  var Params = {RESOURCE: FILER.GetFileName(Resource), NAME: Target.Name, FOLDER: FILER.GetFileName(Target.Path)};
+
+  Choice = CMD.Popup($$("CONFIRM2", Params), 0, Title, $("BUTTON").OK_CANCEL+$("ICON").QUESTION); 
+
+  if(Choice == $("ANSWER").CANCEL){
+    CMD.Popup($$("NOTICE3", {REASON: "ユーザの指示により"}),
+     0, Title, $("BUTTON").OK+$("ICON").INFO); GUI.UndoMinimizeAll(); WSH.Quit(false)};
+
+  var Khronos = function(bundle){
+    var overlay = function(word, mask){return (mask.slice(0, String(word).length * -1) + word)};
+    var timeStamp =
+      [[bundle.getFullYear(), overlay(bundle.getMonth() + 1, "00"), overlay(bundle.getDate(), "00")].join("-"),
+       [overlay(bundle.getHours(), "00"), overlay(bundle.getMinutes(), "00"),
+        overlay(bundle.getSeconds(), "00"), overlay(bundle.getMilliseconds(), "000")]. join("-")]. join("_");
+    return timeStamp;
+  };
+
+  try{
+    var DefPath = FILER.BuildPath(DataDir , DefProf.split("/").join("\\"))
+    if(Choice == $("ANSWER").OK){	
+      if(FILER.FolderExists(DefPath)){
+        var Stash = "Prof" + Khronos(new Date()); FILER.GetFolder(DefPath).Name = Stash;
+        var LogSpec = FILER.BuildPath(ProfDir, "Import-Profile.log");}
+      if(FILER.FileExists(LogSpec)){FILER.DeleteFile(LogSpec);}
+      CMD.Run('robocopy "'+Resource.Items().Item().Path+'" "'+DefPath+'" /MIR /LOG:"'+LogSpec+'"', $("FIG").HEADLESS, $("SYNC").ASYNC)
+      for(var seq=0, limit=20, flag=false; !flag; seq++){
+        if(seq > limit){throw new Error("TIMEOUT ERROR")}
+        try{var Promise = FILER.OpenTextFile(LogSpec, $("F_OPT").APPENDING, $("F_OPT").REUSE_ONLY); Promise.Close(); flag = true; }
+        catch(exc){CMD.Popup("データをコピー中．．．", 1, "お待ちください", $("BUTTON").OK+$("ICON").INFO); WSH.Sleep(300); continue}
+      }
+      CMD.Popup($("COMPLETE"), 0, Title, $("BUTTON").OK+$("ICON").INFO); var Judgement = true;
+    }
+  }catch(exc){
+    CMD.Popup($("ALERT2"), 0, Title, $("BUTTON").OK+$("ICON").STOP);
+    if(!FILER.FolderExists(DefPath)){
+      FILER.GetFolder(FILER.BuildPath(ProfDir, Stash)).Name = Params.FOLDER; }
+    var Judgement = false;
+  }finally{
+    var PassFile = FILER.BuildPath(ProfDir, Stash + "\\logins.json");
+    if(FILER.FileExists(PassFile)){FILER.CopyFile(PassFile, DefPath + "\\", true) }
+    try{
+      var Queue = []; var History = new Enumerator(FILER.GetFolder(ProfDir).SubFolders);
+      for(var item; !History.atEnd(); History.moveNext()){
+        item = History.item().Name;
+        if($("RE").HISTORY.test(item)){ Queue.push(FILER.BuildPath(ProfDir, item)) }
+      }
+      Queue.sort(function(a, b){return (Date.parse(FILER.GetFolder(a).DateLastModified) - Date.parse(FILER.GetFolder(b).DateLastModified) ) } );
+      for(var item in Queue.slice(0, -3)){FILER.DeleteFolder(Queue[item])}
+    }catch(exc){
+      Judgement = false;
+    }finally{
+      GUI.UndoMinimizeAll(); WSH.Quit(Judgement);
+    }
+  }
+
+]]>
+</script>
+
+</job>
+</package>

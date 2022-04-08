@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+
+<package>
+<job id="Win-Jupyter1">
+<?job error="True" debug="False"?>
+
+<object id="CMD" progid="WScript.Shell" /><object id="FILER" progid="Scripting.FileSystemObject" />
+<object id="LOG_IO" progid="ADODB.Stream" /><object id="ERR_IO" progid="ADODB.Stream" />
+<object id="TMP_IO" progid="ADODB.Stream" />
+
+<resource id="S_MODE">
+{READ: 1, WRITE: 2, READ_WRITE: 3, BIN: 1, TEXT: 2, CRLF: -1, LF: 10, CREATE_ONLY: 1, CREATE_REUSE: 2, 
+ AS_LINE: -2, AS_FULL: -1, FOR_CHARS: 0, FOR_LINE: 1, CLOSED: 0, OPEN: 1}
+</resource>
+<resource id="S_CONF">
+{Charset: "UTF-8", Mode: $("S_MODE").READ_WRITE, Type: $("S_MODE").TEXT, Lineseparator: $("S_MODE").CRLF}
+</resource>
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1, MINIMUM: 2, MAXIMUM: 3}</resource>
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+
+<resource id="BUTTON">{OK: 0, OK_CANCEL: 1, YES_NO_CANCEL: 3, YES_NO: 4}</resource>
+<resource id="ICON">{STOP: 16, QUESTION: 32, WARNING: 48, INFO: 64}</resource>
+<resource id="ANSWER">{OK: 1, CANCEL: 2, YES: 6, NO: 7}</resource>
+<resource id="REPORT">{POPUP: true, SILENT: false}</resource>
+
+<resource id="F_MODE">
+{READING: 1, WRITING: 2, APPENDING: 8, ALLOW_CREATE: true, REUSE_ONLY: false, EXIST_OK: true, EXIST_NG: false}
+</resource>
+<resource id="F_TYPE">
+{JUNCTION: 1040, SYM_DIR: 1040, SYM_FILE: 1056, HARDLINK: 32, REAL_FILE: 32, REAL_DIR: 16}
+</resource>
+<resource id="FS_ERR">
+{FILE_NOT_EXISTS: -2146828235, DIR_NOT_EXISTS: -2146828212, INVALID_FILE_SPEC: -2146828236,
+ FD_ACCESS_DENIED: -2146828218, DIR_ALREADY_EXISTS: -2146828230, FILE_STATUS_BUSY: -2146825286}
+</resource>
+
+<resource id="REG_ERR">
+{KEY_ENTRY_NOT_EXISTS: -2147024894, INVALID_ROOT_KEY: -2147024893, KEY_ACCESS_DENIED: -2147024891}
+</resource>
+
+<resource id="DIALOG">"
+《エラーに対する応答要求》\n
+\n
+${DMAIN}：${LOCATION}\n
+${MEMBER}：${RESOURCE}\n
+\n
+エラーメッセージ：${MESSAGE}\n
+コード：${ERR_CODE} / タイプ：${ERR_TYPE}\n
+\n
+${OFFER}\n
+\n
+※エラーログ${STATUS}"
+</resource>
+
+<resource id="TERMINATE">"
+このエラーに対する選択肢はありません。\n
+処理を中断してプログラムを終了します"
+</resource>
+
+<resource id="CONFIRM">"
+エラーを無視して続行しますか？\n
+[はい]続行 ／ [いいえ]中断"
+</resource>
+
+<resource id="REDUNDANCY">
+"Jupyterはすでに起動中です。"
+</resource>
+
+<resource id="RETRY">
+"Jupyter起動失敗。再試行しますか？"
+</resource>
+
+<resource id="DEBUG">"[${DATETIME}] ${ERR_TYPE}:${ERR_CODE} ${RESOURCE} ${MESSAGE}"</resource>
+
+<resource id="BANNER"><![CDATA["\n
+<<<<<Jupyter startup at ${DATETIME}>>>>>\n
+"]]></resource>
+
+<script language="JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var $$ = function(id, parts){
+    var assign = function(match, p1, p2, p3, offset, string){ return parts[p2] };
+    return $(id).replace(/(\${)(.+?)(})/mg, assign) };
+
+  var _ = function(val){
+    if(!RegExp('^".*"$', 'g').test(val) && RegExp('\\s', 'g').test(val)){return '"' + val + '"'}else{return val} };
+
+  var GetEnv = function(envVar){ return CMD.ExpandEnvironmentStrings(envVar) };
+
+  var SetEnv = function(envVar, val){return CMD.Environment("Process").Item(envVar) = val};
+
+  var NormPath = function(path){return FILER.GetAbsolutePathName(path)};
+
+  var JoinPath = function(){
+    if(arguments.length < 2 ){ FILER.BuildPath() }
+    var fullPath = arguments[0];
+    for(var seq=1; seq < arguments.length; seq++){
+      fullPath = FILER.BuildPath(fullPath, arguments[seq]); }
+    return fullPath;
+  };
+
+  var MakeDirs = function(dirs, mode){
+    var fullPath = FILER.GetAbsolutePathName(dirs);
+    if(FILER.FolderExists(fullPath)){ if(mode){return fullPath}else{FILER.CreateFolder(fullPath) } }
+    var dirQueue = [];
+    while(!FILER.FolderExists(fullPath)){
+      dirQueue.push(fullPath);
+      fullPath = FILER.GetParentFolderName(fullPath) }
+    while(0 < dirQueue.length){ FILER.CreateFolder(dirQueue.pop()) }
+  };
+
+  var PutMB = function(stream, path, settings, string){
+    for(var key in settings){stream[key] = settings[key];} stream.Open();
+    try{
+      if(FILER.FileExists(path)){stream.LoadFromFile(path)}
+      var rows = string.split("\n");
+      for(var row=0; row < rows.length; row++){
+        stream.Position = stream.Size; stream.WriteText(rows[row], $("S_MODE").FOR_LINE); }
+      stream.SaveToFile(path, $("S_MODE").CREATE_REUSE) }
+    finally{ if(stream.State == $("S_MODE").OPEN){ stream.Close() } }
+  };
+
+  var Trap = function(resource, err, popup, offer, parts){
+    var errLog = FILER.BuildPath(FILER.GetParentFolderName(WSH.ScriptFullName), "error.log");
+    if(err.number >= -2146829999 && err.number <= -2146820000){
+      var template = {DMAIN: "パス", LOCATION: NormPath(FILER.GetParentFolderName(resource)),
+                      MEMBER: "ファイル/フォルダ", RESOURCE: FILER.GetFileName(resource),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var type in $("FS_ERR")){
+        if($("FS_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else if(err.number >= -2147029999 && err.number <= -2147020000){
+      var template = {DMAIN: "ルート", LOCATION: resource.slice(0, resource.indexOf("\\")),
+                      MEMBER: "キー", RESOURCE: resource.slice(resource.indexOf("\\")),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var root in $("REG_ROOT")){
+        if(root == template.LOCATION){template.LOCATION = $("REG_ROOT")[root]; break} }
+      for(var type in $("REG_ERR")){
+        if($("REG_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else{WSH.Echo(err.messge); return}
+    try{var stream = FILER.OpenTextFile(errLog, $("F_MODE").APPENDING, $("F_MODE").ALLOW_CREATE);
+      stream.WriteLine($$("DEBUG", {
+        DATETIME: new Date().toLocaleString(), ERR_TYPE: template.ERR_TYPE,
+        ERR_CODE: err.number, RESOURCE: resource, MESSAGE: err.message}))
+      stream.Close(); template.STATUS = "参照可";
+    }catch(exc){ template["STATUS"] = "出力不可" }
+    if(popup){ return CMD.Popup($$("DIALOG", template), 0, "一時停止", parts) }
+    else{ return } };
+
+  var AppDir = FILER.GetParentFolderName(WSH.ScriptFullName), BinDir = JoinPath(AppDir, "scripts");
+  var VarDir = JoinPath(AppDir, "Var"), LogDir = JoinPath(VarDir, "Log"), ProcDir = JoinPath(VarDir, "Run");
+  var BinSpec = JoinPath(BinDir, "winjupyter_lab.bat"), WinDir = NormPath(GetEnv("%WINDIR%"));
+  var LogSpec = JoinPath(LogDir, "Win-Jupyter.log"), ArgsSpec = JoinPath(ProcDir, "Win-Jupyter.args");
+
+  SetEnv("PROMPT", "$P$_$G"); SetEnv("PYTHONIOENCODING", "utf-8:utf-8");
+
+  var UserHome = GetEnv("%USERPROFILE%"), UserProf = GetEnv("%APPDATA%"), LocalProf = GetEnv("%LOCALAPPDATA%");
+
+  if(FILER.FileExists(ArgsSpec)){
+    try{FILER.DeleteFile(ArgsSpec)}
+    catch(exc){
+      if(exc.number == $("FS_ERR").FD_ACCESS_DENIED){
+        Trap(ArgsSpec, exc, $("REPORT").POPUP, $("REDUNDANCY"), $("BUTTON").OK + $("ICON").INFO); WSH.Quit(true)}
+      else{Trap(ArgsSpec, exc, $("REPORT").SILENT); WSH.Quit(false)} } }
+
+  var Banner = $$("BANNER", {DATETIME: new Date().toLocaleString()});
+  try{MakeDirs(LogDir, $("F_MODE").EXIST_OK)}
+  catch(exc){Trap(LogDir, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK + $("ICON").STOP); WSH.Quit(false) }
+  for(var answer; answer != $("ANSWER").NO; WSH.Sleep(500)){
+    try{PutMB(LOG_IO, LogSpec, $("S_CONF"), Banner); break}
+    catch(exc){
+      answer = Trap(LogSpec, exc, $("REPORT").POPUP, $("RETRY"), $("BUTTON").YES_NO+$("ICON").QUESTION);
+      if(answer == $("ANSWER").NO){WSH.Quit(false)} } }
+
+  var Args=" --port-retries=0";
+  try{MakeDirs(ProcDir, $("F_MODE").EXIST_OK)}
+  catch(exc){Trap(ProcDir, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK+$("ICON").STOP); WSH.Quit(false) }
+  var Semaphore = FILER.OpenTextFile(ArgsSpec, $("F_MODE").WRITING, $("F_MODE").ALLOW_CREATE);
+  Semaphore.WriteLine(Args);
+
+  var Status = !CMD.Run(_(BinSpec) + Args + " >> " + _(LogSpec) + " 2>&1", $("FIG").HEADLESS, $("SYNC").AWAIT);
+
+  while(FILER.FileExists(LogSpec)){
+    try{
+      var TmpLog = JoinPath(VarDir, new Date().getTime() + ".tmp"); FILER.MoveFile(LogSpec, TmpLog)}
+    catch(exc){
+      if(exc.number == $("FS_ERR").FD_ACCESS_DENIED){WSH.Sleep(500) }
+      else{Trap(LogSpec, exc, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK + $("ICON").STOP); WSH.Quit(false) } } }
+
+  for(var key in $("S_CONF")){ TMP_IO[key] = $("S_CONF")[key];} TMP_IO.Open(); TMP_IO.LoadFromFile(TmpLog);
+  for(var key in $("S_CONF")){ LOG_IO[key] = $("S_CONF")[key];} LOG_IO.Open();
+
+  for(var offset, queue = []; TMP_IO.State != $("S_MODE").CLOSED; queue.push(offset)){
+    if(!TMP_IO.EOS){
+      offset = TMP_IO.Position;
+      TMP_IO.SkipLine(); if(queue.length >= 100){queue.shift()}
+      continue }
+      TMP_IO.Position = queue[0];
+      while(!TMP_IO.EOS){
+        LOG_IO.Position = LOG_IO.Size;
+        LOG_IO.WriteTexT(TMP_IO.ReadText($("S_MODE").AS_LINE), $("S_MODE").FOR_LINE)
+        LOG_IO.SaveToFile(LogSpec, $("S_MODE").CREATE_REUSE)
+      }
+      LOG_IO.Position = ( queue.slice(-10)[0] - queue[0] +1 );
+      TMP_IO.Close();
+  }
+
+  try{ FILER.DeleteFile(TmpLog) }catch(exc){ Trap(TmpLog, exc, $("REPORT").SILENT) }
+
+  if(!Status){
+    for(var row, queue = []; LOG_IO.State != $("S_MODE").CLOSED; queue.push(row)){
+      if(!LOG_IO.EOS){
+        row = LOG_IO.ReadText($("S_MODE").AS_LINE);
+        if(RegExp("^\\s*" + Banner.split("\n")[1] + "\\s*$", "g").test(row)){ queue = []; }
+        continue }
+      CMD.Popup(queue.join("\n"), 0, "【Jupyter : 終了ステータス】", $("BUTTON").OK + $("ICON").WARNING);
+      LOG_IO.Close() }
+  }
+
+  Semaphore.Close(); FILER.DeleteFile(ArgsSpec); WSH.Quit(Status);
+
+]]>
+</script>
+
+</job>
+</package>

@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+
+<package>
+<job id="Stealth-7Z">
+<?job error="True" debug="False" ?>
+
+<object id="CMD" progid="WScript.Shell" />
+<object id="FILER" progid="Scripting.FileSystemObject" />
+
+<resource id="FIG">{HEADLESS: 0, DEFAULT: 1, MINIMUM: 2, MAXIMUM: 3}</resource>
+<resource id="SYNC">{AWAIT: true, ASYNC: false}</resource>
+
+<resource id="BUTTON">{OK: 0, OK_CANCEL2: 1, YES_NO_CANCEL: 3, YES_NO: 4}</resource>
+<resource id="ICON">{STOP: 16, QUESTION: 32, WARNING: 48, INFO: 64}</resource>
+<resource id="ANSWER">{OK: 1, CANCEL: 2, YES: 6, NO: 7}</resource>
+<resource id="REPORT">{POPUP: true, SILENT: false}</resource>
+
+<resource id="F_MODE">
+{READING: 1, WRITING: 2, APPENDING: 8, ALLOW_CREATE: true, REUSE_ONLY: false, EXIST_OK: true, EXIST_NG: false}
+</resource>
+<resource id="F_ATTR">
+{JUNCTION: 1040, SYM_DIR: 1040, SYM_FILE: 1056, HARDLINK: 32, REALFile: 32, REAL_DIR: 16}
+</resource>
+<resource id="FS_ERR">
+{FILE_NOT_EXISTS: -2146828235, FOLDER_NOT_EXISTS: -2146828212, FILE_SATUS_BUSY: -2146823281,
+ FOLDER_STATUS_BUSY: -2146828218, FOLDER_ALREADY_EXISTS: -2146828230, INVALID_FILE_SPEC: -2146828236}
+</resource>
+
+<resource id="REG_ROOT">
+{HKCU: "HKEY_CURRENT_USER", HKU: "HKEY_USERS", HKLM: "HKEY_LOCAL_MACHINE", HKCR: "HKEY_CLASSES_ROOT"}
+</resource>
+<resource id="REG_ERR">
+{KEY_ENTRY_NOT_EXISTS: -2147024894, INVALID_ROOT_KEY: -2147024893, KEY_ACCESS_DENIED: -2147024891}
+</resource>
+
+<resource id="DIALOG">"
+《エラーに対する応答要求》\n
+\n
+${DMAIN}：${LOCATION}\n
+${MEMBER}：${RESOURCE}\n
+\n
+エラーメッセージ：${MESSAGE}\n
+コード：${ERR_CODE} / タイプ：${ERR_TYPE}\n
+\n
+${OFFER}\n
+\n
+※エラーログ${STATUS}"
+</resource>
+
+<resource id="CONFIRM">"
+エラーを無視して終了しますか？\n
+\n
+［はい］強制終了 ／ ［いいえ］再試行"
+</resource>
+
+<resource id="TERMINATE">"
+このエラーに対する選択肢はありません。\n
+処理を中断してプログラムを終了します"
+</resource>
+
+<resource id="DEBUG">"[${DATETIME}] ${ERR_TYPE}:${ERR_CODE} ${RESOURCE} ${MESSAGE}"</resource>
+
+<resource id="REG_PATH">HKCU\Software\7-Zip\</resource>
+
+<script language = "JavaScript">
+<![CDATA[
+
+  var $ = function(id){
+    var rawVal = getResource(id).replace(new RegExp("\r|\n", "gm"), " ");
+    return (new Function("return " + rawVal))() };
+
+  var $$ = function(id, parts){
+    var assign = function(match, p1, p2, p3, offset, string){ return parts[p2] };
+    return $(id).replace(/(\${)(.+?)(})/mg, assign) };
+
+  var _ = function(val){
+    if(!RegExp('^".*"$', 'g').test(val) && RegExp('\\s', 'g').test(val)){return '"' + val + '"'}else{return val} };
+
+  var GetEnv = function(envVar){ return CMD.ExpandEnvironmentStrings(envVar) };
+
+  var SetEnv = function(envVar, val){return CMD.Environment("Process").Item(envVar) = val };
+
+  var JoinPath = function(){
+    if(arguments.length < 2 ){ FILER.BuildPath() }
+    var fullPath = arguments[0];
+    for(var seq=1; seq < arguments.length; seq++){
+      fullPath = FILER.BuildPath(fullPath, arguments[seq]); }
+    return fullPath;
+  };
+
+  var MakeDirs = function(dirs, mode){
+    var fullPath = FILER.GetAbsolutePathName(dirs);
+    if(FILER.FolderExists(fullPath)){ if(mode){return fullPath}else{FILER.CreateFolder(fullPath) } }
+    var dirQueue = [];
+    while(!FILER.FolderExists(fullPath)){
+      dirQueue.push(fullPath);
+      fullPath = FILER.GetParentFolderName(fullPath) }
+    while(0 < dirQueue.length){ FILER.CreateFolder(dirQueue.pop()) }
+  };
+
+  var NormPath = function(path){return FILER.GetAbsolutePathName(path)};
+
+  var Trap = function(resource, err, popup, offer, parts){
+    var errLog = FILER.BuildPath(FILER.GetParentFolderName(WSH.ScriptFullName), "error.log");
+    if(err.number >= -2146829999 && err.number <= -2146820000){
+      var template = {DMAIN: "パス", LOCATION: NormPath(FILER.GetParentFolderName(resource)),
+                      MEMBER: "ファイル/フォルダ", RESOURCE: FILER.GetFileName(resource),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var type in $("FS_ERR")){
+        if($("FS_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else if(err.number >= -2147029999 && err.number <= -2147020000){
+      var template = {DMAIN: "ルート", LOCATION: resource.slice(0, resource.indexOf("\\")),
+                      MEMBER: "キー", RESOURCE: resource.slice(resource.indexOf("\\")),
+                      ERR_TYPE: "UNKNOWN_ERROR", ERR_CODE: err.number, MESSAGE: err.message,
+                      OFFER: offer};
+      for(var root in $("REG_ROOT")){
+        if(root == template.LOCATION){template.LOCATION = $("REG_ROOT")[root]; break} }
+      for(var type in $("REG_ERR")){
+        if($("REG_ERR")[type] == err.number){template.ERR_TYPE = type; break} }
+    }else{WSH.Echo(err.messge); return}
+    try{var stream = FILER.OpenTextFile(errLog, $("F_MODE").APPENDING, $("F_MODE").ALLOW_CREATE);
+      stream.WriteLine($$("DEBUG", {
+        DATETIME: new Date().toLocaleString(), ERR_TYPE: template.ERR_TYPE,
+        ERR_CODE: err.number, RESOURCE: resource, MESSAGE: err.message}))
+      stream.Close(); template.STATUS = "参照可";
+    }catch(exc){ template["STATUS"] = "出力不可" }
+    if(popup){ return CMD.Popup($$("DIALOG", template), 0, "一時停止", parts) }
+    else{ return } };
+
+
+  var AppDir = FILER.GetParentFolderName(WSH.ScriptFullName), CfgFile = JoinPath(AppDir, "config.reg");
+  var Barrier = JoinPath(AppDir, "Proc");
+
+  SetEnv("PROMPT", "$P$_$G")
+
+  var ArgList = [];
+  for(var seq=0; seq < WSH.Arguments.Count(); seq++){ ArgList[seq] = (_(WSH.Arguments(seq))) }
+  var Args = ArgList.join(" ");
+
+  var Establish =  function(args){ MakeDirs(Barrier, $("F_MODE").EXIST_OK);
+    var instance = CMD.Exec(JoinPath(AppDir, "7zFM.exe") + " " + Args);
+    var argsFile = JoinPath(Barrier, instance.ProcessID + ".args");
+    var stream = FILER.OpenTextFile(argsFile, $("F_MODE").WRITING, $("F_MODE").ALLOW_CREATE);
+    stream.WriteLine(Args);
+    while(!instance.Status){ WSH.Sleep(500) }
+    for(var answer; answer != $("ANSWER").YES; WSH.Sleep(500)){
+      try{stream.Close(); FILER.DeleteFile(argsFile); break}
+      catch(exc){
+        answer = Trap(argsFile, exc, $("REPORT").POPUP, $("CONFIRM"), $("BUTTON").YES_NO+$("ICON").WARNING);
+      } } return };
+
+  var Restore = function(){
+    if(FILER.FileEXISTS(CfgFile)){ CMD.Run("reg import " + _(CfgFile),  $("FIG").HEADLESS, $("SYNC").AWAIT) } };
+
+  var Backup = function(){
+    CMD.Run("reg export " + getResource("REG_PATH") + " " + _(CfgFile) + " /y",  $("FIG").HEADLESS, $("SYNC").AWAIT) };
+
+  var Dropout = function(){
+      CMD.Run("reg delete " + getResource("REG_PATH") + " /f", $("FIG").HEADLESS, $("SYNC").ASYNC) };
+  
+  var Discard = function(origin, error){
+      Trap(origin, error, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK+$("ICON").STOP); WSH.Quit(false) };
+
+  if(FILER.FolderExists(Barrier)){
+    try{ FILER.DeleteFolder(Barrier); Restore() }
+    catch(exc){if(exc.number != $("FS_ERR").FOLDER_STATUS_BUSY){ Discard(Barrier, exc) } } }
+  else{ Restore() }
+
+  Establish();
+
+  if(FILER.FolderExists(Barrier)){
+    try{ FILER.DeleteFolder(Barrier) }
+    catch(exc){if(exc.number == $("FS_ERR").FOLDER_STATUS_BUSY){ WSH.Quit(true) }
+               else{ Discard(Barrier, exc) } }
+  }
+
+  try{CMD.RegRead(getResource("REG_PATH"))}
+    catch(exc){if(exc.number != $("FS_ERR").KEY_ENTRY_NOT_EXISTS){ Dropout() }
+               Discard(getResource("REG_PATH"), exc) }
+
+  Backup(); Dropout(); WSH.Quit(true);
+
+]]>
+</script>
+
+</job>
+</package>
