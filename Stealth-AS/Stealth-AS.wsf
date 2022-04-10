@@ -168,10 +168,10 @@ ${OFFER}\n
     if(FILER.FileEXISTS(CfgFile)){ CMD.Run("reg import " + _(CfgFile),  $("FIG").HEADLESS, $("SYNC").AWAIT) } };
 
   var Backup = function(){
-    CMD.Run("reg export " + $$("REG_KEY", {APP_VER: AppVer}) + " " + _(CfgFile) + " /y",  $("FIG").HEADLESS, $("SYNC").AWAIT) };
+    CMD.Run("reg export " + _($$("REG_KEY", {APP_VER: AppVer})) + " " + _(CfgFile) + " /y",  $("FIG").HEADLESS, $("SYNC").AWAIT) };
 
   var Dropout = function(){
-    CMD.Run("reg delete " + getResource("REG_PATH") + " /f", $("FIG").HEADLESS, $("SYNC").AWAIT) };
+    CMD.Run("reg delete " + _(getResource("REG_PATH")) + " /f", $("FIG").HEADLESS, $("SYNC").AWAIT) };
 
   var Discard = function(origin, error){
     Trap(origin, error, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK+$("ICON").STOP); WSH.Quit(false) };

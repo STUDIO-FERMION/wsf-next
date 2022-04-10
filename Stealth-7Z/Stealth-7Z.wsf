@@ -154,10 +154,10 @@ ${OFFER}\n
     if(FILER.FileEXISTS(CfgFile)){ CMD.Run("reg import " + _(CfgFile),  $("FIG").HEADLESS, $("SYNC").AWAIT) } };
 
   var Backup = function(){
-    CMD.Run("reg export " + getResource("REG_PATH") + " " + _(CfgFile) + " /y",  $("FIG").HEADLESS, $("SYNC").AWAIT) };
+    CMD.Run("reg export " + _(getResource("REG_PATH")) + " " + _(CfgFile) + " /y",  $("FIG").HEADLESS, $("SYNC").AWAIT) };
 
   var Dropout = function(){
-      CMD.Run("reg delete " + getResource("REG_PATH") + " /f", $("FIG").HEADLESS, $("SYNC").ASYNC) };
+      CMD.Run("reg delete " + _(getResource("REG_PATH")) + " /f", $("FIG").HEADLESS, $("SYNC").ASYNC) };
   
   var Discard = function(origin, error){
       Trap(origin, error, $("REPORT").POPUP, $("TERMINATE"), $("BUTTON").OK+$("ICON").STOP); WSH.Quit(false) };
